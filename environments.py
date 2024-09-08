@@ -110,3 +110,19 @@ class LinearMixtureMDP:
         _, v_star, _ = self.compute_q_star_average_reward()  # Compute the optimal q^*, v^*, and J^*
         span_v_star = np.max(v_star) - np.min(v_star)  # Compute the span of v^*
         return 2 * span_v_star
+
+    def run_optimal_policy_from_q_star(self):
+        '''Run the optimal policy based on q^* obtained from compute_q_star_average_reward.'''
+        q_star, _, _ = self.compute_q_star_average_reward()  # Get q^* from average reward setting
+        optimal_policy = np.argmax(q_star, axis=1)  # Derive optimal policy from q^*
+        
+        total_reward_optimal = []  # To store the rewards obtained by the optimal policy
+
+        self.reset()  # Reset environment to the initial state
+        for t in range(self.T):
+            s_t = self.state
+            a_t = optimal_policy[s_t]  # Select the action from the optimal policy
+            _, reward = self.step(s_t, a_t)  # Take the action and receive reward
+            total_reward_optimal.append(reward)
+
+        return total_reward_optimal
