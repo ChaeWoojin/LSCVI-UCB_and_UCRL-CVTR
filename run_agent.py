@@ -3,56 +3,20 @@ import matplotlib.pyplot as plt
 from environments import LinearMixtureMDP
 from agent import UCRL_CVTR
 
-def value_iteration(env, theta_star, gamma, tol=1e-6):
-    '''Run value iteration to find the optimal policy for the true MDP.'''
-    nState, nAction = env.nState, env.nAction
-    V = np.zeros(nState)  # Initialize value function
-    Q = np.zeros((nState, nAction))  # Initialize Q-values
-    delta = float('inf')  # Initialize change in value function
-
-    while delta > tol:  # Run value iteration until convergence
-        delta = 0
-        for s in range(nState):
-            v = V[s]
-            for a in range(nAction):
-                # Compute transition probabilities using true theta_star
-                transition_probs = np.dot(env.phi[s, a, :], theta_star)
-                transition_probs /= np.sum(transition_probs)  # Normalize probabilities
-                Q[s, a] = env.reward[s, a] + gamma * np.dot(transition_probs, V)
-
-            V[s] = np.max(Q[s, :])  # Update value function with the best action's value
-            delta = max(delta, abs(v - V[s]))  # Update delta to track convergence
-
-    # Derive optimal policy from optimal value function
-    optimal_policy = np.argmax(Q, axis=1)
-    return optimal_policy
-
-
-def run_optimal_policy(env, theta_star, T, gamma):
-    '''Run the optimal policy using value iteration to find the optimal policy.'''
-    # Use value iteration to find the optimal policy
-    optimal_policy = value_iteration(env, theta_star, gamma)
-    total_reward_optimal = []
-    
-    # Run the MDP using the optimal policy
-    for t in range(T):
-        s_t = env.state
-        a_t = optimal_policy[s_t]  # Select the action from the optimal policy
-        _, reward = env.step(s_t, a_t)  # Take the action and receive reward
-        total_reward_optimal.append(reward)
-    
+def run_optimal_policy(env):
+    '''Run the optimal policy based on q^* from the environment's compute_q_star_average_reward.'''
+    total_reward_optimal = env.run_optimal_policy_from_q_star()
     return total_reward_optimal
-
 
 # Experiment setup
 np.random.seed(0)
 d = 10                              # dimensionality of the feature vector
-nState = 500                        # number of states   
-nAction = 200                       # number of actions
+nState = 10                        # number of states   
+nAction = 5                       # number of actions
 theta_star = np.random.rand(d)      # unknown probability kernel generating parameter
 lambda_reg = 1                      # regularization parameter  
-gamma = 0.99                        # discounting factor
 T = 1000                            # operating round
+gamma = 1-np.log(T)/np.sqrt(T)                        # discounting factor
 B = d
 
 # Linear Mixture MDP experiment
@@ -65,9 +29,10 @@ H = env_mixture.compute_upper_bound_H()  # Compute the upper bound H from the en
 agent_mixture = UCRL_CVTR(env_mixture, init_s, gamma, phi, lambda_reg, B, H)  # Pass phi and H as a parameter to the agent
 total_reward_mixture = agent_mixture.run()
 
-# Run the optimal policy with true theta_star using value iteration
+# Experiment setup remains the same
+# Run the optimal policy with q^* using compute_q_star_average_reward
 env_mixture.reset()
-total_reward_optimal = run_optimal_policy(env_mixture, theta_star, T, gamma)
+total_reward_optimal = run_optimal_policy(env_mixture)
 
 # Calculate regret
 regret = np.array(total_reward_optimal) - np.array(total_reward_mixture)
