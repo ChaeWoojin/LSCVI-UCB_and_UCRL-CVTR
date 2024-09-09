@@ -2,146 +2,98 @@ import numpy as np
 from tqdm import tqdm
 import cvxpy as cp
 
-
 class UCRL_CVTR:
     def __init__(self, env, init_s, gamma, phi, lambda_reg, B, H):
         '''
         Initialize UCRL-CVTR agent.
-        Args:
-            env - LinearMixtureMDP - the environment
-            init_s - int - initial state
-            gamma - float - discount factor
-            phi - np.array - feature map provided by the environment
-            lambda_reg - int - regularization parameter for the gram matrices
-            H - float - upper bound for the value function
-            B - float - norm bound for theta
         '''
         self.env = env
         self.state = init_s
         self.gamma = gamma
-        self.phi = phi  
+        self.phi = phi
         self.lambda_reg = lambda_reg
         self.H = H
-        self.B = B            
-
+        self.B = B
         self.T = env.T
         self.d = env.d
         self.delta = 0.01
 
         # Initialize Gram matrix and other parameters
-        self.Sigma = self.lambda_reg * np.eye(self.d)  # Gram matrix for variance
-        self.b = np.zeros(self.d)                      # RHS for ridge regression
-        self.theta_hat = np.zeros(self.d)              # Estimate for θ_star
-        self.N = self.T                                # N as per Algorithm 2
+        self.Sigma = self.lambda_reg * np.eye(self.d)
+        self.b = np.zeros(self.d)
+        self.theta_hat = np.zeros(self.d)
+        self.N = self.T
 
     def run(self):
-        '''Run the γ-UCRL-CVTR algorithm with progress bar.'''
+        '''Run the γ-UCRL-CVTR algorithm.'''
         total_reward = []
-        N = self.N
-        
-        # Progress bar for episodes (i.e., timesteps)
         with tqdm(total=self.T, desc="Total Timesteps", unit="timestep") as pbar:
             while self.env.timestep < self.T:
-                # Set parameters
-                t_k = self.env.timestep
-                theta_k = np.copy(self.theta_hat)
-                beta_k = self.H * np.sqrt(self.d * np.log((self.lambda_reg + t_k * self.H) / (self.delta * self.lambda_reg))) + np.sqrt(self.lambda_reg) * self.B
-                Sigma_k = np.copy(self.Sigma)
-                N_k = self.T - t_k + 1
-
-                # Initialize V and Q values for value iteration
-                V = np.zeros((N_k + 1, self.env.nState))
-                Q = np.zeros((N_k + 1, self.env.nState, self.env.nAction))
-                V[0, :] = np.ones(self.env.nState) / (1 - self.gamma)
-                Q[0, :, :] = np.ones((self.env.nState, self.env.nAction)) / (1 - self.gamma)
-
-                # Perform value iteration with clipping
-                for n in tqdm(range(N_k), desc="Value Iteration", leave=False):
-                    V[n + 1, :], Q[n + 1, :, :] = self.value_iteration(V[n, :], Q[n, :, :], theta_k, beta_k, Sigma_k)
-
-                # Execution phase
-                done = False
-                while not done:
-                    s_t = self.env.state
-                    xi_t = np.zeros(self.env.nAction, dtype=int)  # Array to store \xi_t(a) for each action
-
-                    # For each action, find \xi_t(a)
-                    for a in range(self.env.nAction):
-                        # Find \xi_t(a) as the timestep n that maximizes \widetilde{Q}(s_t, a)
-                        Q_values = [Q[i, s_t, a] for i in range(self.T - self.env.timestep + 1, N_k + 1)]
-                        xi_t[a] = np.argmax(Q_values) + (self.T - self.env.timestep + 1)  # Offset by starting index
-
-                    # Use \xi_t(a) to select the best action a_t
-                    a_t = self.select_action([Q[xi_t[a], s_t, a] for a in range(self.env.nAction)])
-
-                    # Take the action and receive the reward and next state
-                    s_next, reward = self.env.step(s_t, a_t)
-                    total_reward.append(reward)
-
-                    # Compute W_t(s) = V_{(\xi_t - 1)}(s) - min V_{(\xi_t - 1)}
-                    V_xi_1 = V[xi_t[a_t] - 1, :]  # V at timestep \xi_t(a_t)
-                    W_t = V_xi_1 - np.min(V_xi_1)
-
-                    # Compute the feature map \phi_{W_t}(s_t, a_t)
-                    phi_W = np.sum(self.phi[s_t, a_t, :] * W_t[:, np.newaxis], axis=0)
-
-                    # Update Gram matrix and b vector (Ridge regression)
-                    self.Sigma += np.outer(phi_W, phi_W)  # Update \widehat{\Sigma}_{t+1}
-                    self.b += phi_W * W_t[s_next]  # Update \widehat{b}_{t+1}
-
-                    # Update theta_hat (parameter estimate)
-                    self.update_theta()
-
-                    # Check if episode is terminal
-                    if np.linalg.det(self.Sigma) > 2 * np.linalg.det(Sigma_k) or self.env.timestep >= self.env.T:
-                        done = True
-
-                    # Update the progress bar
-                    pbar.update(1)
-
+                t_k, theta_k, beta_k, Sigma_k, N_k = self.initialize_episode_params()
+                V, Q = self.perform_value_iteration(N_k, theta_k, beta_k, Sigma_k)
+                total_reward += self.execute_policy(Q, V, Sigma_k, t_k, N_k, pbar)
         return total_reward
 
-    def value_iteration(self, V, Q, theta_k, beta_k, Sigma_k):
-        '''Perform value iteration and clipping as per Algorithm 2.'''
-        for s in range(self.env.nState):
-            for a in range(self.env.nAction):
-                # Maximize over the confidence set and compute Q
-                Q[s, a] = self.compute_Q(s, a, V, theta_k, beta_k, Sigma_k)  # Pass beta_k and B here
+    def initialize_episode_params(self):
+        '''Initialize parameters for each episode.'''
+        t_k = self.env.timestep
+        theta_k = np.copy(self.theta_hat)
+        beta_k = self.compute_confidence_bound(t_k)
+        Sigma_k = np.copy(self.Sigma)
+        N_k = self.T - t_k + 1
+        return t_k, theta_k, beta_k, Sigma_k, N_k
 
-            # Update value function
-            V[s] = max(Q[s, :])
+    def compute_confidence_bound(self, t_k):
+        '''Compute the confidence bound beta_k.'''
+        return self.H * np.sqrt(self.d * np.log((self.lambda_reg + t_k * self.H) / (self.delta * self.lambda_reg))) + np.sqrt(self.lambda_reg) * self.B
 
-        # Clipping step to ensure span remains within bounds
-        min_V = np.min(V)
-        for s in range(self.env.nState):
-            V[s] = min(V[s], min_V + self.H)
+    def perform_value_iteration(self, N_k, theta_k, beta_k, Sigma_k):
+        '''Perform value iteration and return the updated Q and V values.'''
+        V = np.zeros((N_k + 1, self.env.nState))
+        Q = np.zeros((N_k + 1, self.env.nState, self.env.nAction))
+        V[0, :] = np.ones(self.env.nState) / (1 - self.gamma)
+        Q[0, :, :] = np.ones((self.env.nState, self.env.nAction)) / (1 - self.gamma)
+
+        for n in tqdm(range(N_k), desc="Value Iteration", leave=False):
+            V[n + 1, :], Q[n + 1, :, :] = self.value_iteration(V[n, :], Q[n, :, :], theta_k, beta_k, Sigma_k)
 
         return V, Q
 
+    def execute_policy(self, Q, V, Sigma_k, t_k, N_k, pbar):
+        '''Execute the learned policy and update rewards and parameters.'''
+        total_reward = []
+        while not self.terminate_episode(Sigma_k):
+            s_t = self.env.state
+            a_t = self.select_action_for_state(s_t, Q, N_k)
+
+            s_next, reward = self.env.step(s_t, a_t)
+            total_reward.append(reward)
+
+            W_t = self.compute_W_t(V, a_t, s_t)
+            phi_W = self.compute_phi_W(s_t, a_t, W_t)
+
+            self.update_parameters(phi_W, W_t, s_next)
+            pbar.update(1)
+        return total_reward
+
+    def terminate_episode(self, Sigma_k):
+        '''Check if the episode should terminate based on Gram matrix determinant.'''
+        return np.linalg.det(self.Sigma) > 2 * np.linalg.det(Sigma_k) or self.env.timestep >= self.env.T
+
+    def value_iteration(self, V, Q, theta_k, beta_k, Sigma_k):
+        '''Perform value iteration for a single step.'''
+        for s in range(self.env.nState):
+            for a in range(self.env.nAction):
+                Q[s, a] = self.compute_Q(s, a, V, theta_k, beta_k, Sigma_k)
+            V[s] = max(Q[s, :])
+        return self.clip_value_function(V), Q
+
     def compute_Q(self, s, a, V, theta_k, beta_k, Sigma_k):
-        '''
-        Compute the Q-value using the solution to the maximization problem.
-        Args:
-            s - int - state
-            a - int - action
-            V - np.array - value function
-            theta_k - np.array - parameter estimate
-            beta_k - float - confidence bound scaling
-            Sigma_k - np.array - covariance matrix
-        Returns:
-            Q_value - float - the scalar Q-value for state-action pair (s, a)
-        '''
-        # Solve for the optimal theta in the confidence set
+        '''Compute the Q-value for a given state-action pair.'''
         theta_star = self.solve_max_theta_single_sa(s, a, V, theta_k, beta_k, Sigma_k)
-
-        # Compute the transition probabilities using theta_star
         probabilities = np.dot(self.phi[s, a, :], theta_star)
-        probabilities /= np.sum(probabilities)  # Ensure that probabilities sum to 1
-
-        # Compute the Q-value as the reward plus the expected value of the next states
-        Q_value = self.env.reward[s, a] + self.gamma * np.dot(probabilities, V)
-
-        return Q_value
+        probabilities /= np.sum(probabilities)  # Normalize
+        return self.env.reward[s, a] + self.gamma * np.dot(probabilities, V)
 
     def solve_max_theta_single_sa(self, s, a, V, theta_k, beta_k, Sigma_k):
         '''
@@ -200,10 +152,38 @@ class UCRL_CVTR:
         
         return theta_star
 
-    def select_action(self, Q):
-        '''Select the action that maximizes the Q-value.'''
-        return np.argmax(Q)
+    def select_action_for_state(self, s_t, Q, N_k):
+        '''Select the action that maximizes the Q-value for the given state.'''
+        # Loop over all actions and find the best timestep that maximizes Q
+        xi_t = np.array([
+            np.argmax([Q[i, s_t, a] for i in range(self.T - self.env.timestep + 1, N_k + 1)]) 
+            + (self.T - self.env.timestep + 1) for a in range(self.env.nAction)
+        ])
+    
+        # Return the action with the highest Q-value for the state s_t
+        return np.argmax([Q[xi_t[a], s_t, a] for a in range(self.env.nAction)])
+
+
+    def compute_W_t(self, V, a_t, s_t):
+        '''Compute W_t for the current state-action pair.'''
+        V_xi_1 = V[a_t - 1, :]
+        return V_xi_1 - np.min(V_xi_1)
+
+    def compute_phi_W(self, s_t, a_t, W_t):
+        '''Compute the feature map \phi_{W_t}(s_t, a_t).'''
+        return np.sum(self.phi[s_t, a_t, :] * W_t[:, np.newaxis], axis=0)
+
+    def update_parameters(self, phi_W, W_t, s_next):
+        '''Update the Gram matrix and b vector, then recalculate theta_hat.'''
+        self.Sigma += np.outer(phi_W, phi_W)
+        self.b += phi_W * W_t[s_next]
+        self.update_theta()
 
     def update_theta(self):
         '''Update the estimate for θ_star (theta_hat) using ridge regression.'''
         self.theta_hat = np.linalg.solve(self.Sigma, self.b)
+
+    def clip_value_function(self, V):
+        '''Apply clipping to the value function to ensure span remains within bounds.'''
+        min_V = np.min(V)
+        return np.minimum(V, min_V + self.H)

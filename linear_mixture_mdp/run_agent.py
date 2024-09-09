@@ -3,59 +3,56 @@ import matplotlib.pyplot as plt
 from environments import LinearMixtureMDP
 from agent import UCRL_CVTR
 
-def run_optimal_policy(env):
-    '''Run the optimal policy based on q^* from the environment's compute_q_star_average_reward.'''
-    total_reward_optimal = env.run_optimal_policy_from_q_star()
-    return total_reward_optimal
+def run_mixture_experiment():
+    '''Run the UCRL-CVTR algorithm on the Linear Mixture MDP environment.'''
 
-# Experiment setup
-np.random.seed(0)
-d = 10                              # dimensionality of the feature vector
-nState = 10                        # number of states   
-nAction = 5                       # number of actions
-theta_star = np.random.rand(d)      # unknown probability kernel generating parameter
-lambda_reg = 1                      # regularization parameter  
-T = 1000                            # operating round
-gamma = 1-np.log(T)/np.sqrt(T)                        # discounting factor
-B = d
+    # Experiment setup
+    T = 100  # Operating round
+    d = 8  # Dimensionality of the feature vector
+    nState = 2  # Number of states   
+    nAction = 128  # Number of actions
+    gamma = 1 - np.log(T) / np.sqrt(T)  # Discount factor
+    theta_star = np.random.rand(d)  # Unknown probability kernel generating parameter
+    lambda_reg = 1  # Regularization parameter  
+    B = d  # B-bounded linear mixture MDP
 
-# Linear Mixture MDP experiment
-env_mixture = LinearMixtureMDP(d, nState, nAction, theta_star, gamma, T)
-init_s = env_mixture.state
-phi = env_mixture.phi  # Retrieve phi from the environment before running the algorithm
-H = env_mixture.compute_upper_bound_H()  # Compute the upper bound H from the environment
+    # Create the Linear Mixture MDP environment
+    env_mixture = LinearMixtureMDP(d, nState, nAction, theta_star, gamma, T)
+    init_s = env_mixture.state
+    phi = env_mixture.phi  # Retrieve phi from the environment before running the algorithm
+    H = env_mixture.H  # Upper bound H is precomputed in the environment
 
-# Run the UCRL-CVTR algorithm
-agent_mixture = UCRL_CVTR(env_mixture, init_s, gamma, phi, lambda_reg, B, H)  # Pass phi and H as a parameter to the agent
-total_reward_mixture = agent_mixture.run()
+    # Initialize the agent (UCRL-CVTR)
+    agent = UCRL_CVTR(env_mixture, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, B=B, H=H)
+    total_reward_mixture = agent.run()
+    
+    # Reset the environment and run the optimal policy
+    env_mixture.reset()
+    total_reward_optimal = env_mixture.run_optimal_policy_from_q_star()
+    
+    # Calculate regret
+    regret = np.array(total_reward_optimal) - np.array(total_reward_mixture)
 
-# Experiment setup remains the same
-# Run the optimal policy with q^* using compute_q_star_average_reward
-env_mixture.reset()
-total_reward_optimal = run_optimal_policy(env_mixture)
+    # Plot cumulative rewards
+    plt.subplot(1, 2, 1)
+    plt.plot(np.cumsum(total_reward_mixture), label='UCRL-CVTR (Linear Mixture MDP)')
+    plt.plot(np.cumsum(total_reward_optimal), label='Optimal Policy', linestyle='--')
+    plt.xlabel('Time')
+    plt.ylabel('Cumulative Reward')
+    plt.title('Cumulative Reward vs Time')
+    plt.legend()
 
-# Calculate regret
-regret = np.array(total_reward_optimal) - np.array(total_reward_mixture)
+    # Plot regret
+    plt.subplot(1, 2, 2)
+    plt.plot(np.cumsum(regret), label='Regret')
+    plt.xlabel('Time')
+    plt.ylabel('Cumulative Regret')
+    plt.title('Regret vs Time')
+    plt.legend()
 
-# Plot cumulative rewards and regret
-plt.figure(figsize=(12, 6))
+    plt.tight_layout()
+    plt.show()
 
-# Plot cumulative rewards
-plt.subplot(1, 2, 1)
-plt.plot(np.cumsum(total_reward_mixture), label='UCRL-CVTR (Linear Mixture MDP)')
-plt.plot(np.cumsum(total_reward_optimal), label='Optimal Policy', linestyle='--')
-plt.xlabel('Time')
-plt.ylabel('Cumulative Reward')
-plt.title('Cumulative Reward vs Time')
-plt.legend()
 
-# Plot regret
-plt.subplot(1, 2, 2)
-plt.plot(np.cumsum(regret), label='Regret')
-plt.xlabel('Time')
-plt.ylabel('Cumulative Regret')
-plt.title('Regret vs Time')
-plt.legend()
-
-plt.tight_layout()
-plt.show()
+if __name__ == '__main__':
+    run_mixture_experiment()

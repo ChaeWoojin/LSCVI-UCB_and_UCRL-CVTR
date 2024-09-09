@@ -8,36 +8,42 @@ class LinearMixtureMDP:
             d - int - dimensionality of the feature vector
             nState - int - number of states
             nAction - int - number of actions
-            T - int - episode length (time horizon)
             theta_star - np.array - true parameter for the linear transition model
             gamma - float - discount factor
+            T - int - episode length (time horizon)
         '''
-        self.d = d  # Dimensionality of the feature vector
-        self.nState = int(nState)  # Number of states (ensure it's an integer)
-        self.nAction = int(nAction)  # Number of actions (ensure it's an integer)
+        self.d = d
+        self.nState = int(nState)
+        self.nAction = int(nAction)
         self.theta_star = theta_star
         self.gamma = gamma
-        self.T = int(T)  # Episode length or time horizon
+        self.T = int(T)
         self.state = 0
         self.timestep = 0
-        self.phi = self.generate_phi()  # Generate phi upon initialization
-        self.reward = self.generate_reward()  # Initialize deterministic reward function
+        self.phi = self.generate_phi()  # Generate phi during initialization
+        self.reward = self.generate_reward()  # Generate deterministic reward function
+
+        # Compute q_star, v_star, J_star, and H during initialization
+        self.q_star, self.v_star, self.J_star = self.compute_q_star_average_reward()
+        self.H = self.compute_upper_bound_H()  # Compute H based on the computed q^* and v^*
 
     def reset(self):
+        '''Reset the environment to the initial state.'''
         self.state = 0
         self.timestep = 0
         return self.state
 
     def generate_phi(self):
-        '''Generates and returns the feature map phi(s, a, s') that ensures the probability constraint.'''
+        '''Generate and return the feature map phi(s, a, s').'''
         np.random.seed(0)
-        phi = np.zeros((self.nState, self.nAction, self.nState, self.d))  # Ensure dimensions are integers
+        phi = np.zeros((self.nState, self.nAction, self.nState, self.d))
         
         for s in range(self.nState):
             for a in range(self.nAction):
                 for s_prime in range(self.nState):
                     phi[s, a, s_prime] = np.random.rand(self.d)
-
+                
+                # Normalize the feature vector to ensure valid transition probabilities
                 dot_products = np.array([np.dot(phi[s, a, s_prime], self.theta_star) for s_prime in range(self.nState)])
                 normalization_factor = np.sum(dot_products)
                 if normalization_factor > 0:
@@ -47,11 +53,11 @@ class LinearMixtureMDP:
         return phi
 
     def generate_reward(self):
-        '''Generates a deterministic reward function r(s, a) in [0, 1].'''
+        '''Generate a deterministic reward function r(s, a) in [0, 1].'''
         np.random.seed(0)
-        reward = np.random.rand(self.nState, self.nAction)  # Generate random values in [0, 1]
+        reward = np.random.rand(self.nState, self.nAction)  # Generate random rewards in [0, 1]
         return reward
-    
+
     def transition_prob(self, s, a):
         '''Compute transition probabilities directly using phi(s, a) and theta_star without post-normalization.'''
         probs = np.array([np.dot(self.phi[s, a, s_prime], self.theta_star) for s_prime in range(self.nState)])
@@ -60,15 +66,7 @@ class LinearMixtureMDP:
         return probs
 
     def step(self, s, a):
-        '''
-        Takes one step in the environment.
-        Args:
-            s - int - current state
-            a - int - action taken
-        Returns:
-            newState - int - next state based on the transition model
-            reward   - float - reward for the step
-        '''
+        '''Take one step in the environment.'''
         transition_probs = self.transition_prob(s, a)
         newState = np.random.choice(self.nState, p=transition_probs)
         reward = self.reward[s, a]  # Deterministic reward
@@ -78,10 +76,9 @@ class LinearMixtureMDP:
 
     def compute_q_star_average_reward(self):
         '''
-        Compute the optimal action-value function q^*(s, a) using Bellman optimality equation for average reward setting:
-        J^* + q^*(s,a) = r(s,a) + \mathbb{P}v^*(s)
+        Compute the optimal action-value function q^*(s, a) using the Bellman optimality equation for the average reward setting.
         '''
-        q_star = np.zeros((self.nState, self.nAction))  # Initialize q^* to zero
+        q_star = np.zeros((self.nState, self.nAction))  # Initialize q^*
         v_star = np.zeros(self.nState)  # Bias function (v^*)
         J_star = 0  # Initialize average reward
         epsilon = 1e-6  # Convergence threshold
@@ -107,15 +104,12 @@ class LinearMixtureMDP:
 
     def compute_upper_bound_H(self):
         '''Compute the upper bound H = 2 * sp(v^*) using q^*(s, a) in the average reward setting.'''
-        _, v_star, _ = self.compute_q_star_average_reward()  # Compute the optimal q^*, v^*, and J^*
-        span_v_star = np.max(v_star) - np.min(v_star)  # Compute the span of v^*
+        span_v_star = np.max(self.v_star) - np.min(self.v_star)  # Compute the span of v^*
         return 2 * span_v_star
 
     def run_optimal_policy_from_q_star(self):
         '''Run the optimal policy based on q^* obtained from compute_q_star_average_reward.'''
-        q_star, _, _ = self.compute_q_star_average_reward()  # Get q^* from average reward setting
-        optimal_policy = np.argmax(q_star, axis=1)  # Derive optimal policy from q^*
-        
+        optimal_policy = np.argmax(self.q_star, axis=1)  # Derive optimal policy from q^*
         total_reward_optimal = []  # To store the rewards obtained by the optimal policy
 
         self.reset()  # Reset environment to the initial state
