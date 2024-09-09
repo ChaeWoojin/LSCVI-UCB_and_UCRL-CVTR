@@ -21,7 +21,9 @@ class LinearMDP:
         self.mu = self.generate_mu()  # True parameter matrix for the transition kernel (nState x d)
         self.phi = self.generate_phi()  # Generate feature map for state-action pairs
         self.theta = self.generate_theta()  # Generate theta based on phi to ensure reward within [0, 1]
-        self.reward = self.generate_reward()  # Generate reward based on phi and theta
+        self.reward = self.generate_reward()  # Generate reward based on phi and theta  
+        self.q_star, self.v_star, self.J_star = self.compute_q_star_average_reward()  # Compute q*, v*, and J*
+        self.H = self.compute_upper_bound_H()  # Compute H during initialization
 
     def reset(self):
         '''Reset the environment to the initial state.'''
@@ -30,9 +32,7 @@ class LinearMDP:
         return self.state
 
     def generate_mu(self):
-        '''
-        Generate the feature map mu(s) for every state.
-        '''
+        '''Generate the feature map mu(s) for every state.'''
         np.random.seed(0)
         mu = np.zeros((self.nState, self.d))
         for s in range(self.nState):
@@ -41,10 +41,7 @@ class LinearMDP:
         return mu
 
     def generate_phi(self):
-        '''
-        Generate the feature map φ(s, a) for each state-action pair.
-        Ensure that the sum of inner products for φ(s,a) and μ(s') over all s' equals 1 for fixed (s,a).
-        '''
+        '''Generate the feature map φ(s, a) for each state-action pair.'''
         np.random.seed(0)
         phi = np.zeros((self.nState, self.nAction, self.d))  # Feature map φ(s, a) ∈ R^d
 
@@ -53,8 +50,7 @@ class LinearMDP:
                 # Randomly generate the feature vector φ(s, a)
                 phi[s, a] = np.random.rand(self.d)
 
-                # Now, adjust φ(s, a) to satisfy the condition
-                # Ensure that the sum of dot products φ(s,a)⋅μ(s') over s' is 1
+                # Ensure the sum of inner products φ(s,a)⋅μ(s') over s' is 1
                 dot_products = np.array([np.dot(phi[s, a], self.mu[s_prime]) for s_prime in range(self.nState)])
                 normalization_factor = np.sum(dot_products)
 
@@ -64,13 +60,10 @@ class LinearMDP:
         return phi
 
     def generate_theta(self):
-        '''
-        Generate the true parameter θ after generating φ, ensuring rewards are within [0, 1].
-        θ is scaled to ensure that for each (s, a), the reward is within [0, 1].
-        '''
+        '''Generate the true parameter θ after generating φ, ensuring rewards are within [0, 1].'''
         theta = np.random.rand(self.d)  # Start by generating a random θ
         
-        # Adjust θ based on the range of φ(s, a) to ensure rewards are within [0, 1]
+        # Adjust θ to ensure rewards are within [0, 1]
         max_inner_product = np.max([np.dot(self.phi[s, a], theta) for s in range(self.nState) for a in range(self.nAction)])
         
         if max_inner_product > 0:
@@ -79,10 +72,7 @@ class LinearMDP:
         return theta
 
     def generate_reward(self):
-        '''
-        Generate a deterministic reward function r(s, a) as the inner product of φ(s, a) and θ.
-        Since θ has been scaled, the reward is already constrained within [0, 1].
-        '''
+        '''Generate a deterministic reward function r(s, a) as the inner product of φ(s, a) and θ.'''
         reward = np.zeros((self.nState, self.nAction))  # Initialize reward array
         for s in range(self.nState):
             for a in range(self.nAction):
@@ -92,56 +82,30 @@ class LinearMDP:
         return reward
 
     def transition_prob(self, s, a):
-        '''
-        Compute the transition probabilities based on φ(s, a) and μ(s').
-        Args:
-            s - int - current state
-            a - int - action taken
-        Returns:
-            probs - np.array - transition probabilities for each next state
-        '''
-        # Transition probabilities are a linear function of φ(s, a) and μ(s')
+        '''Compute the transition probabilities based on φ(s, a) and μ(s').'''
         probs = np.array([np.dot(self.mu[s_prime], self.phi[s, a]) for s_prime in range(self.nState)])  # μ is (nState, d) and φ(s, a) is (d,)
         assert np.all(probs >= 0), "Transition probabilities should be non-negative"
         assert np.isclose(np.sum(probs), 1), "Transition probabilities should sum to 1"
         return probs
 
     def step(self, s, a):
-        '''
-        Take one step in the environment.
-        Args:
-            s - int - current state
-            a - int - action taken
-        Returns:
-            newState - int - next state
-            reward - float - reward for the step
-        '''
-        # Compute the transition probabilities for the next state
+        '''Take one step in the environment.'''
         transition_probs = self.transition_prob(s, a)
-        # Sample the next state based on the transition probabilities
         newState = np.random.choice(self.nState, p=transition_probs)
-        # Get the reward for the current state-action pair
         reward = self.reward[s, a]
         
-        # Update the state and timestep
         self.state = newState
         self.timestep += 1
         
         return newState, reward
 
     def compute_upper_bound_H(self):
-        '''
-        Compute the upper bound H = 2 * sp(v^*).
-        '''
-        q_star, v_star, _ = self.compute_q_star_average_reward()  # Get optimal q^*, v^*, and J^*
-        span_v_star = np.max(v_star) - np.min(v_star)  # Compute the span of v^*
+        '''Compute the upper bound H = 2 * sp(v^*).'''
+        span_v_star = np.max(self.v_star) - np.min(self.v_star)  # Compute the span of v^*
         return 2 * span_v_star
 
     def compute_q_star_average_reward(self):
-        '''
-        Compute the optimal action-value function q^*(s, a) using Bellman optimality equation for average reward setting.
-        J^* + q^*(s,a) = r(s,a) + \mathbb{P}v^*(s)
-        '''
+        '''Compute the optimal action-value function q^*(s, a) using Bellman optimality equation for average reward setting.'''
         q_star = np.zeros((self.nState, self.nAction))  # Initialize q^*
         v_star = np.zeros(self.nState)  # Bias function v^*
         J_star = 0  # Average reward
@@ -167,9 +131,8 @@ class LinearMDP:
         return q_star, v_star, J_star
 
     def run_optimal_policy(self):
-        '''Run the environment using the optimal policy based on the provided φ, μ, and θ.'''
-        q_star, _, _ = self.compute_q_star_average_reward()  # Compute q^*
-        optimal_policy = np.argmax(q_star, axis=1)  # Derive optimal policy from q^*
+        '''Run the environment using the optimal policy based on the computed q^*.'''
+        optimal_policy = np.argmax(self.q_star, axis=1)  # Derive optimal policy from q^*
         total_reward_optimal = []  # Store rewards
 
         self.reset()  # Reset environment

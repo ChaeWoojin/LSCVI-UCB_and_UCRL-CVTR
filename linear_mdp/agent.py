@@ -27,107 +27,99 @@ class LSCVI_UCB_LinearMDP:
         self.nState = env.nState
         self.nAction = env.nAction
 
-        # Initialize Gram matrix and historical set
+        # Initialize Gram matrix and history
         self.Sigma = self.lambda_reg * np.eye(self.d)  # Gram matrix
         self.history = []  # To store (s, a, s')
 
     def run(self):
         '''Run the γ-LSCVI-UCB algorithm.'''
         total_reward = []
-        H = self.H
-
         while self.env.timestep < self.T:
-            t_k = self.env.timestep
-            Sigma_k = np.copy(self.Sigma)
-            history_k = np.copy(self.history)
-            N_k = self.T - t_k + 1  # Iteration rounds
+            V_k, Q_k, history_k = self.perform_value_iteration()
+            total_reward += self.execute_policy(Q_k, V_k)
 
-            # Initialize V_k and Q_k values for value iteration
-            V_k = np.zeros((N_k + 1, self.env.nState))
-            Q_k = np.zeros((N_k + 1, self.env.nState, self.env.nAction))
-            V_k[0, :] = np.ones(self.env.nState) / (1 - self.gamma)
-            Q_k[0, :, :] = np.ones((self.env.nState, self.env.nAction)) / (1 - self.gamma)
-            
-            # Main loop for value iteration
-            for n in tqdm(range(N_k), desc="Value Iteration"):
-                # Update w_n^k for current n
-                w_n_k = self.compute_weight_vector(V_k[n, :], Sigma_k, history_k)
+        return total_reward
 
-                # Compute the updated Q and V values
-                Q_k[n + 1, :, :], V_k[n + 1, :] = self.update_Q_V(w_n_k, V_k[n, :])
+    def perform_value_iteration(self):
+        '''Perform value iteration for current step.'''
+        N_k = self.T - self.env.timestep + 1  # Number of rounds remaining
+        V_k = np.zeros((N_k + 1, self.env.nState))  # Initialize V
+        Q_k = np.zeros((N_k + 1, self.env.nState, self.env.nAction))  # Initialize Q
 
-            # Policy execution
-            while np.linalg.det(self.Sigma) <= 2 * np.linalg.det(Sigma_k) and self.env.timestep < self.env.T:
-                s_t = self.env.state
-                xi_t = np.zeros(self.env.nAction, dtype=int)  # Array to store \xi_t(a) for each action
+        # Set the initial values of V and Q for step 0
+        V_k[0, :] = np.ones(self.env.nState) / (1 - self.gamma)
+        Q_k[0, :, :] = np.ones((self.env.nState, self.env.nAction)) / (1 - self.gamma)
 
-                # For each action, find \xi_t(a)
-                for a in range(self.env.nAction):
-                    # Find \xi_t(a) as the timestep n that maximizes \widetilde{Q}(s_t, a)
-                    Q_values = [Q_k[i, s_t, a] for i in range(self.T - self.env.timestep + 1, N_k + 1)]
-                    xi_t[a] = np.argmax(Q_values) + (self.T - self.env.timestep + 1)  # Offset by starting index
+        Sigma_k = np.copy(self.Sigma)
+        history_k = np.copy(self.history)
 
-                # Use \xi_t(a) to select the best action a_t
-                a_t = self.select_action([Q_k[xi_t[a], s_t, a] for a in range(self.env.nAction)])
+        # Loop through each value iteration step
+        for n in tqdm(range(N_k), desc="Value Iteration"):
+            w_n_k = self.compute_weight_vector(V_k[n, :], Sigma_k, history_k)
+            Q_k[n + 1, :, :], V_k[n + 1, :] = self.update_Q_V(w_n_k, V_k[n, :])
 
-                # Take the action and receive the reward and next state
-                s_next, reward = self.env.step(s_t, a_t)
-                total_reward.append(reward)
+        return V_k, Q_k, history_k
 
-                # Add the transition to history
-                self.history.append((s_t, a_t, s_next))
+    def execute_policy(self, Q_k, V_k):
+        '''Execute policy to collect rewards and update history.'''
+        total_reward = []
+        while np.linalg.det(self.Sigma) <= 2 * np.linalg.det(self.Sigma) and self.env.timestep < self.env.T:
+            s_t = self.env.state
+            a_t = self.select_best_action(Q_k, s_t)
 
-                # Update Gram matrix with the new sample
-                self.update_gram_matrix(self.state, a_t)
+            # Take the action, observe next state and reward
+            s_next, reward = self.env.step(s_t, a_t)
+            total_reward.append(reward)
 
-                # Move to the next state
-                self.state = s_next
+            # Add transition to history and update Gram matrix
+            self.history.append((s_t, a_t, s_next))
+            self.update_gram_matrix(s_t, a_t)
+
+            # Move to the next state
+            self.state = s_next
 
         return total_reward
 
     def compute_weight_vector(self, V_k, Sigma_k, history):
-        '''Compute the weight vector w_n^k for current iteration.'''
+        '''Compute the weight vector w_n^k for the current iteration.'''
         w_n_k = np.zeros(self.d)
-
         for (s, a, s_next) in history:
             phi_sa = self.phi[s, a, :]
             delta_V = V_k[s_next] - np.min(V_k)
             w_n_k += np.dot(phi_sa, delta_V)
 
-        w_n_k = np.linalg.solve(Sigma_k, w_n_k)  # Apply the inverse of the Gram matrix
-        return w_n_k
+        return np.linalg.solve(Sigma_k, w_n_k)
 
     def update_Q_V(self, w_n_k, V_k):
-        '''Update Q and V using w_n_k and clipping.'''
+        '''Update Q and V using the weight vector and bonus term.'''
         Q_k = np.zeros((self.nState, self.nAction))
-
-        # Compute the inverse of the covariance matrix for the bonus term
-        Sigma_inv = np.linalg.inv(self.Sigma)
+        Sigma_inv = np.linalg.inv(self.Sigma)  # Inverse of the Gram matrix
 
         for s in range(self.nState):
             for a in range(self.nAction):
-                # Calculate the bonus term: beta * ||phi(s, a)||_{Sigma^-1}
-                phi_sa = self.phi[s, a, :]  # Feature vector for state-action pair (s, a)
+                # Compute bonus term for uncertainty estimation
+                phi_sa = self.phi[s, a, :]
                 bonus = self.beta * np.sqrt(np.dot(np.dot(phi_sa.T, Sigma_inv), phi_sa))
 
-                # Update Q function
+                # Update Q function and apply value clipping
                 Q_k[s, a] = min(
-                    self.env.reward[s, a] + self.gamma * (np.dot(self.phi[s, a, :], w_n_k) + np.min(V_k) + bonus),
+                    self.env.reward[s, a] + self.gamma * (np.dot(phi_sa, w_n_k) + np.min(V_k) + bonus),
                     1 / (1 - self.gamma)
                 )
 
-        # Update V function by taking the max over actions
         V_k = np.max(Q_k, axis=1)
-
-        # Apply clipping to V
-        V_k = np.minimum(V_k, np.min(V_k) + self.H)
+        V_k = np.minimum(V_k, np.min(V_k) + self.H)  # Apply clipping to V
 
         return Q_k, V_k
 
+    def select_best_action(self, Q_k, s_t):
+        '''Select the action that maximizes Q-value for the current state.'''
+        xi_t = np.zeros(self.env.nAction, dtype=int)
+        for a in range(self.env.nAction):
+            Q_values = [Q_k[i, s_t, a] for i in range(self.env.T - self.env.timestep + 1)]
+            xi_t[a] = np.argmax(Q_values) + (self.env.T - self.env.timestep + 1)
 
-    def select_action(self, Q):
-        '''Select the action that maximizes the Q-value.'''
-        return np.argmax(Q)
+        return np.argmax([Q_k[xi_t[a], s_t, a] for a in range(self.env.nAction)])
 
     def update_gram_matrix(self, s, a):
         '''Update the Gram matrix Σ using the current state-action pair.'''

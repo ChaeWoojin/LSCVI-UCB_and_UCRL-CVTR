@@ -7,10 +7,10 @@ def run_experiment():
     '''Run the γ-LSCVI-UCB algorithm on the Linear MDP environment.'''
 
     # Experiment setup
-    T = 100  # Episode length
-    d = 10  # Dimensionality of the feature vector
-    nState = 10  # Number of states
-    nAction = 5  # Number of actions
+    T = 1000  # Episode length
+    d = 8  # Dimensionality of the feature vector
+    nState = 2  # Number of states
+    nAction = 128  # Number of actions
     gamma = 1 - np.log(T) / np.sqrt(T)  # Discount factor
     lambda_reg = 1.0  # Regularization parameter
     beta = 1.0  # Bonus coefficient
@@ -20,13 +20,13 @@ def run_experiment():
     env_linear = LinearMDP(d, nState, nAction, gamma, T)
     init_s = env_linear.state
     phi = env_linear.phi
-    H = env_linear.compute_upper_bound_H()  # Compute the upper bound H
+    H = env_linear.H  # Upper bound H is already computed in the environment
 
     # Initialize the agent (LSCVI-UCB)
     agent = LSCVI_UCB_LinearMDP(env_linear, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, H=H, beta=beta)
     total_reward_linear = agent.run()
     
-    # Experiment setup remains the same
+    # Reset the environment and run the optimal policy
     env_linear.reset()
     total_reward_optimal = env_linear.run_optimal_policy()
     
@@ -53,6 +53,5 @@ def run_experiment():
     plt.tight_layout()
     plt.show()
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_experiment()
