@@ -1,6 +1,7 @@
 import numpy as np
 from tqdm import tqdm
-import cvxpy as cp
+import gurobipy as gp
+from gurobipy import GRB
 
 class UCRL_CVTR:
     def __init__(self, env, init_s, gamma, phi, lambda_reg, B, H):
@@ -16,7 +17,7 @@ class UCRL_CVTR:
         self.B = B
         self.T = env.T
         self.d = env.d
-        self.delta = 0.01
+        self.delta = 0.1
 
         # Initialize Gram matrix and other parameters
         self.Sigma = self.lambda_reg * np.eye(self.d)
@@ -83,21 +84,40 @@ class UCRL_CVTR:
     def value_iteration(self, V, Q, theta_k, beta_k, Sigma_k):
         '''Perform value iteration for a single step.'''
         for s in range(self.env.nState):
+            print("done")
             for a in range(self.env.nAction):
                 Q[s, a] = self.compute_Q(s, a, V, theta_k, beta_k, Sigma_k)
             V[s] = max(Q[s, :])
         return self.clip_value_function(V), Q
 
     def compute_Q(self, s, a, V, theta_k, beta_k, Sigma_k):
-        '''Compute the Q-value for a given state-action pair.'''
+        '''
+        Compute the Q-value using the solution to the maximization problem.
+        Args:
+            s - int - state
+            a - int - action
+            V - np.array - value function
+            theta_k - np.array - parameter estimate
+            beta_k - float - confidence bound scaling
+            Sigma_k - np.array - covariance matrix
+        Returns:
+            Q_value - float - the scalar Q-value for state-action pair (s, a)
+        '''
+        # Solve for the optimal theta in the confidence set
         theta_star = self.solve_max_theta_single_sa(s, a, V, theta_k, beta_k, Sigma_k)
+
+        # Compute the transition probabilities using theta_star
         probabilities = np.dot(self.phi[s, a, :], theta_star)
-        probabilities /= np.sum(probabilities)  # Normalize
-        return self.env.reward[s, a] + self.gamma * np.dot(probabilities, V)
+        probabilities /= np.sum(probabilities)  # Ensure that probabilities sum to 1
+
+        # Compute the Q-value as the reward plus the expected value of the next states
+        Q_value = self.env.reward[s, a] + self.gamma * np.dot(probabilities, V)
+
+        return Q_value
 
     def solve_max_theta_single_sa(self, s, a, V, theta_k, beta_k, Sigma_k):
         '''
-        Solve the maximization problem for a single (s,a):
+        Solve the maximization problem for a single (s,a) using Gurobi:
         max_theta <theta, phi_V> 
         subject to theta in confidence set and probability constraints for all (s,a).
         
@@ -114,42 +134,46 @@ class UCRL_CVTR:
         # Compute phi_V for the specific (s,a)
         phi_V = np.sum(self.phi[s, a, :] * V[:, np.newaxis], axis=0)  # shape (d,)
         
-        # Define optimization variable for theta
-        theta = cp.Variable(self.d)
+        # Create a new Gurobi model
+        model = gp.Model("solve_max_theta")
+        model.setParam('OutputFlag', 0)  # Suppress Gurobi output
+
+        # Define the optimization variable for theta (continuous variable of dimension d)
+        theta = model.addMVar(self.d, lb=-GRB.INFINITY, ub=GRB.INFINITY, name="theta")
         
         # Objective: maximize theta^T phi_V
-        objective = cp.Maximize(phi_V @ theta)
+        model.setObjective(phi_V @ theta, GRB.MAXIMIZE)
         
         # Confidence set constraint: ||Sigma_k^{1/2}(theta - theta_k)||_2 <= beta_k
-        constraints = [cp.quad_form(theta - theta_k, Sigma_k) <= beta_k**2]
+        diff_theta = theta - theta_k
+        
+        # Use gp.QuadExpr to build the quadratic constraint ||Sigma_k^{1/2}(theta - theta_k)||_2^2
+        Sigma_sqrt = np.linalg.cholesky(Sigma_k)  # Compute the square root of Sigma_k
+        quadratic_term = (Sigma_sqrt @ diff_theta) @ (Sigma_sqrt @ diff_theta)
 
+        # Add the constraint for the quadratic norm
+        model.addConstr(quadratic_term <= beta_k**2, name="confidence_set")
+        
         # Loop through all state-action pairs to ensure valid transition probabilities
         for s_prime in range(self.env.nState):
             for a_prime in range(self.env.nAction):
                 # Get phi(s', a', ⋅)
                 phi_sa_prime = self.phi[s_prime, a_prime, :]  # shape (nState, d)
                 
-                # Compute probabilities = phi(s', a', ⋅) @ theta
-                probabilities_sa_prime = phi_sa_prime @ theta  # shape (nState,)
-
                 # Probability constraint: Ensure non-negativity
-                constraints.append(probabilities_sa_prime >= 0)
+                model.addConstr(phi_sa_prime @ theta >= 0, name=f"probability_nonneg_{s_prime}_{a_prime}")
 
                 # Probability constraint: Ensure the probabilities sum to 1
-                constraints.append(cp.sum(probabilities_sa_prime) == 1)
+                model.addConstr(gp.quicksum(phi_sa_prime @ theta) == 1, name=f"probability_sum_{s_prime}_{a_prime}")
         
-        # Define the problem
-        problem = cp.Problem(objective, constraints)
-        
-        # Solve the problem
-        problem.solve(solver=cp.SCS)  # Choose appropriate solver
-        
+        # Optimize the model
+        model.optimize()
+
         # Check if a solution is found
-        if theta.value is not None:
-            theta_star = theta.value
+        if model.status == GRB.OPTIMAL:
+            theta_star = theta.X  # Extract the optimal solution
         else:
             raise ValueError("Optimization did not converge")
-        
         return theta_star
 
     def select_action_for_state(self, s_t, Q, N_k):

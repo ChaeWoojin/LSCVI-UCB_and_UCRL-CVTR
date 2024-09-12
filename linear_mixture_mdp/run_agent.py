@@ -7,21 +7,23 @@ from agent_hack import UCRL_CVTR_hack
 def run_mixture_experiment():
     '''Run the UCRL-CVTR algorithm on the Linear Mixture MDP environment.'''
 
-    # Experiment setup
-    T = 5000  # Operating round
-    d = 8  # Dimensionality of the feature vector
-    nState = 5  # Number of states   
-    nAction = 10  # Number of actions
-    gamma = 1 - np.log(T) / np.sqrt(T)  # Discount factor
-    theta_star = np.random.rand(d)  # Unknown probability kernel generating parameter
-    lambda_reg = 1  # Regularization parameter  
-    B = d  # B-bounded linear mixture MDP
+# Experiment setup
+np.random.seed(0)
+d = 8                               # dimensionality of the feature vector
+nState = 2                          # number of states   
+nAction = 128                       # number of actions
+theta_star = np.random.rand(d)      # unknown probability kernel generating parameter
+# print("theta_star: ", theta_star)
+lambda_reg = 1                      # regularization parameter  
+T = 10000                           # operating round
+gamma = 0.9999                      # discounting factor
+B = d
 
-    # Create the Linear Mixture MDP environment
-    env_mixture = LinearMixtureMDP(d, nState, nAction, theta_star, gamma, T)
-    init_s = env_mixture.state
-    phi = env_mixture.phi  # Retrieve phi from the environment before running the algorithm
-    H = env_mixture.H  # Upper bound H is precomputed in the environment
+# Linear Mixture MDP experiment
+env_mixture = LinearMixtureMDP(d, nState, nAction, theta_star, gamma, T)
+init_s = env_mixture.state
+phi = env_mixture.phi  # Retrieve phi from the environment before running the algorithm
+H = env_mixture.compute_upper_bound_H()  # Compute the upper bound H from the environment
 
     # Initialize the agent (UCRL-CVTR)
     agent = UCRL_CVTR_hack(env_mixture, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, B=B, H=H)
