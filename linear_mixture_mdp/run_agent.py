@@ -1,32 +1,36 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from environments import LinearMixtureMDP
-from agent_hack import UCRL_CVTR_hack
-# from agent import UCRL_CVTR
+# from agent_hack import UCRL_CVTR_hack
+from agent import UCRL_CVTR
 
 def run_mixture_experiment():
     '''Run the UCRL-CVTR algorithm on the Linear Mixture MDP environment.'''
 
-# Experiment setup
-np.random.seed(0)
-d = 8                               # dimensionality of the feature vector
-nState = 2                          # number of states   
-nAction = 128                       # number of actions
-theta_star = np.random.rand(d)      # unknown probability kernel generating parameter
-# print("theta_star: ", theta_star)
-lambda_reg = 1                      # regularization parameter  
-T = 10000                           # operating round
-gamma = 0.9999                      # discounting factor
-B = d
+    # Experiment setup
+    np.random.seed(0)
+    d = 8                               # dimensionality of the feature vector
+    nState = 2                          # number of states   
+    nAction = 128                       # number of actions
+    theta_star = np.random.rand(d)      # unknown probability kernel generating parameter
+    print("theta_star: ", theta_star)
+    # print("theta_star: ", theta_star)
+    lambda_reg = 1                      # regularization parameter  
+    T = 1000                           # operating round
+    gamma = 0.9999                      # discounting factor
+    B = d
 
-# Linear Mixture MDP experiment
-env_mixture = LinearMixtureMDP(d, nState, nAction, theta_star, gamma, T)
-init_s = env_mixture.state
-phi = env_mixture.phi  # Retrieve phi from the environment before running the algorithm
-H = env_mixture.compute_upper_bound_H()  # Compute the upper bound H from the environment
+    # Linear Mixture MDP experiment
+    env_mixture = LinearMixtureMDP(d, nState, nAction, theta_star, gamma, T)
+    init_s = env_mixture.state
+    phi = env_mixture.phi  # Retrieve phi from the environment before running the algorithm
+    H = env_mixture.compute_upper_bound_H()  # Compute the upper bound H from the environment
 
     # Initialize the agent (UCRL-CVTR)
-    agent = UCRL_CVTR_hack(env_mixture, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, B=B, H=H)
+    agent = UCRL_CVTR(env_mixture, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, B=B, H=H)
+    print(len(agent.gurobi_model.getConstrs()))
+    
+    # agent = UCRL_CVTR_hack(env_mixture, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, B=B, H=H, theta_star=theta_star)
     total_reward_mixture = agent.run()
     
     # Reset the environment and run the optimal policy

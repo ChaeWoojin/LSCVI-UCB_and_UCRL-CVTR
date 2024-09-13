@@ -55,7 +55,7 @@ class LinearMixtureMDP:
 
     def generate_reward(self):
         '''Generates a deterministic reward function r(s, a) in [0, 1].'''
-        reward = np.random.rand(self.nState, self.nAction)  # Generate random values in [0, 1]
+        reward = np.random.rand(self.nState, self.nAction) * 10 # Generate random values in [0, 1]
         return reward
 
     def transition_prob(self, s, a):
