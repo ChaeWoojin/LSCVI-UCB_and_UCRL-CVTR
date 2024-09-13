@@ -67,7 +67,8 @@ class LinearMDP:
         max_inner_product = np.max([np.dot(self.phi[s, a], theta) for s in range(self.nState) for a in range(self.nAction)])
         
         if max_inner_product > 0:
-            theta /= max_inner_product  # Scale θ so that the maximum reward is 1
+            theta /= max_inner_product  # Scale θ so that the maximum reward is 10
+            theta *= 10
 
         return theta
 
@@ -77,7 +78,7 @@ class LinearMDP:
         for s in range(self.nState):
             for a in range(self.nAction):
                 # Compute the inner product between φ(s,a) and θ
-                reward[s, a] = np.dot(self.phi[s, a], self.theta)
+                reward[s, a] = np.dot(self.phi[s, a], self.theta) 
 
         return reward
 

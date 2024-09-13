@@ -11,7 +11,7 @@ def run_experiment():
     d = 8  # Dimensionality of the feature vector
     nState = 2  # Number of states
     nAction = 128  # Number of actions
-    gamma = 1 - np.log(T) / np.sqrt(T)  # Discount factor
+    gamma = 0.9999  # Discount factor
     lambda_reg = 1.0  # Regularization parameter
     beta = 1.0  # Bonus coefficient
 
