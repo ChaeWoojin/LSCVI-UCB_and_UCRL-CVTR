@@ -102,7 +102,7 @@ class UCRL_CVTR:
         Sigma_k = np.copy(self.Sigma)
         
         prev_epi_size = t_k - prev_t_k
-        if (prev_epi_size < 10):
+        if (prev_epi_size < 5):
             N_k = 10 
         else:
             N_k = prev_epi_size * 2

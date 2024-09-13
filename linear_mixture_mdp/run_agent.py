@@ -28,7 +28,6 @@ def run_mixture_experiment():
 
     # Initialize the agent (UCRL-CVTR)
     agent = UCRL_CVTR(env_mixture, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, B=B, H=H)
-    print(len(agent.gurobi_model.getConstrs()))
     
     # agent = UCRL_CVTR_hack(env_mixture, init_s=init_s, gamma=gamma, phi=phi, lambda_reg=lambda_reg, B=B, H=H, theta_star=theta_star)
     total_reward_mixture = agent.run()
