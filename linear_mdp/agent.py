@@ -34,15 +34,23 @@ class LSCVI_UCB_LinearMDP:
     def run(self):
         '''Run the γ-LSCVI-UCB algorithm.'''
         total_reward = []
-        while self.env.timestep < self.T:
-            V_k, Q_k, history_k = self.perform_value_iteration()
-            total_reward += self.execute_policy(Q_k, V_k)
+        with tqdm(total=self.T, desc="Total Timesteps", unit="timestep") as pbar:
+            while self.env.timestep < self.T:
+                Sigma_k, N_k = self.initialize_episode_params()
+                Q_k = self.perform_value_iteration(N_k, Sigma_k)
+                total_reward += self.execute_policy(Q_k, Sigma_k, N_k)
 
         return total_reward
+    
+    def initialize_episode_params(self):
+        '''Initialize parameters for each episode.'''
+        t_k = self.env.timestep
+        Sigma_k = np.copy(self.Sigma)
+        N_k = self.T - t_k + 1
+        return Sigma_k, N_k
 
-    def perform_value_iteration(self):
+    def perform_value_iteration(self, N_k, Sigma_k):
         '''Perform value iteration for current step.'''
-        N_k = self.T - self.env.timestep + 1  # Number of rounds remaining
         V_k = np.zeros((N_k + 1, self.env.nState))  # Initialize V
         Q_k = np.zeros((N_k + 1, self.env.nState, self.env.nAction))  # Initialize Q
 
@@ -50,7 +58,7 @@ class LSCVI_UCB_LinearMDP:
         V_k[0, :] = np.ones(self.env.nState) / (1 - self.gamma)
         Q_k[0, :, :] = np.ones((self.env.nState, self.env.nAction)) / (1 - self.gamma)
 
-        Sigma_k = np.copy(self.Sigma)
+        Sigma_k = np.copy(Sigma_k)
         history_k = np.copy(self.history)
 
         # Loop through each value iteration step
@@ -58,14 +66,15 @@ class LSCVI_UCB_LinearMDP:
             w_n_k = self.compute_weight_vector(V_k[n, :], Sigma_k, history_k)
             Q_k[n + 1, :, :], V_k[n + 1, :] = self.update_Q_V(w_n_k, V_k[n, :])
 
-        return V_k, Q_k, history_k
+        return Q_k
 
-    def execute_policy(self, Q_k, V_k):
+    def execute_policy(self, Q_k, Sigma_k, N_k):
         '''Execute policy to collect rewards and update history.'''
         total_reward = []
-        while np.linalg.det(self.Sigma) <= 2 * np.linalg.det(self.Sigma) and self.env.timestep < self.env.T:
+        Sigma_k = np.copy(Sigma_k)
+        while np.linalg.det(self.Sigma) <= 2 * np.linalg.det(Sigma_k) and self.env.timestep < self.env.T:
             s_t = self.env.state
-            a_t = self.select_best_action(Q_k, s_t)
+            a_t = self.select_best_action(Q_k, s_t, N_k)
 
             # Take the action, observe next state and reward
             s_next, reward = self.env.step(s_t, a_t)
@@ -112,14 +121,16 @@ class LSCVI_UCB_LinearMDP:
 
         return Q_k, V_k
 
-    def select_best_action(self, Q_k, s_t):
+    def select_best_action(self, Q, s_t, N_k):
         '''Select the action that maximizes Q-value for the current state.'''
-        xi_t = np.zeros(self.env.nAction, dtype=int)
-        for a in range(self.env.nAction):
-            Q_values = [Q_k[i, s_t, a] for i in range(self.env.T - self.env.timestep + 1)]
-            xi_t[a] = np.argmax(Q_values) + (self.env.T - self.env.timestep + 1)
-
-        return np.argmax([Q_k[xi_t[a], s_t, a] for a in range(self.env.nAction)])
+        # Loop over all actions and find the best timestep that maximizes Q
+        xi_t = np.array([
+            np.argmax([Q[i, s_t, a] for i in range(self.T - self.env.timestep + 1, N_k + 1)]) 
+            + (self.T - self.env.timestep + 1) for a in range(self.env.nAction)
+        ])
+    
+        # Return the action with the highest Q-value for the state s_t
+        return np.argmax([Q[xi_t[a], s_t, a] for a in range(self.env.nAction)])
 
     def update_gram_matrix(self, s, a):
         '''Update the Gram matrix Σ using the current state-action pair.'''

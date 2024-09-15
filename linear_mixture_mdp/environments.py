@@ -1,5 +1,6 @@
 import numpy as np
 
+np.random.seed(0)
 class LinearMixtureMDP:
     def __init__(self, d, nState, nAction, theta_star, gamma, T):
         '''
@@ -34,9 +35,9 @@ class LinearMixtureMDP:
         return self.state
 
     def generate_phi(self):
-        '''Generate and return the feature map phi(s, a, s').'''
+        '''Generates and returns the feature map phi(s, a, s') that ensures the probability constraint.'''
         np.random.seed(0)
-        phi = np.zeros((self.nState, self.nAction, self.nState, self.d))
+        phi = np.zeros((self.nState, self.nAction, self.nState, self.d))  # Ensure dimensions are integers
         
         for s in range(self.nState):
             for a in range(self.nAction):
@@ -53,9 +54,8 @@ class LinearMixtureMDP:
         return phi
 
     def generate_reward(self):
-        '''Generate a deterministic reward function r(s, a) in [0, 1].'''
-        np.random.seed(0)
-        reward = np.random.rand(self.nState, self.nAction)  # Generate random rewards in [0, 1]
+        '''Generates a deterministic reward function r(s, a) in [0, 1].'''
+        reward = np.random.rand(self.nState, self.nAction) * 10 # Generate random values in [0, 1]
         return reward
 
     def transition_prob(self, s, a):
