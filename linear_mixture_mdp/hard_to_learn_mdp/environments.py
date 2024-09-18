@@ -1,20 +1,21 @@
 import numpy as np
 import itertools
 
+np.random.seed(0)
 class HardLinearMixtureMDP:
     def __init__(self, d, D, T):
         self.d = d
         self.D = D
+        self.H = self.D
         self.T = T
-        self.delta = 1 / D
+        self.delta = 1 / self.D
         self.nState = 2
         self.nAction = 2**(self.d - 1)
         self.timestep = 0
+        self.state = 0 
         
-        self.state = 0  # initial state is x0
-        
-        self.triangle = ((1/45) * np.sqrt(2 * np.log(2) / 5) * self.d) / (self.D * self.T)
-        self.alpha = np.sqrt(self.triangle / ((d - 1) * (self.triangle + 1)))         
+        self.triangle = (1/45 * np.sqrt(2*np.log(2)/5)) * (self.d) / np.sqrt(self.H * self.T)
+        self.alpha = np.sqrt(self.triangle / ((d - 1) * (1 + self.triangle)))         
         self.beta =  np.sqrt(1 / (1 + self.triangle))
         
         self.theta = np.random.choice([-1, 1], self.d - 1) * self.triangle / (d-1)
@@ -22,10 +23,16 @@ class HardLinearMixtureMDP:
         self.actions = np.array(list(itertools.product([-1, 1], repeat=d-1)))
         self.reward = self.generate_reward()
         self.phi = self.generate_phi()
+        self.varphi = self.generate_varphi()
         
         self.J_star = (self.delta + self.triangle) / (2 * self.delta + self.triangle)
-        self.H = 10
-    
+        self.action_rank = np.argsort(np.array([np.dot(-self.actions[i], self.theta) for i in range(self.nAction)]))
+                      
+    def reset(self):
+        self.state = 0
+        self.timestep = 0
+        return self.state
+        
     def generate_reward(self):
         reward = np.zeros((self.nState, self.nAction))
         reward[0, :] = np.zeros(self.nAction)
@@ -33,21 +40,31 @@ class HardLinearMixtureMDP:
         return reward
     
     def generate_phi(self):
-        phi = np.zeros((2, 2**(self.d - 1), 2, self.d))
+        phi = np.zeros((2, self.nAction, 2, self.d))  # (current state, action, next state, feature dimension)
+        
         for i in range(self.nAction):
-            phi[0, i, 0] = np.concatenate((-self.alpha * self.actions[i], np.array([self.beta * (1 - self.delta)]))) 
-            phi[0, i, 1] = np.concatenate((self.alpha * self.actions[i], np.array([self.beta * self.delta])))
-            phi[1, i, 0] = np.concatenate((np.zeros(self.d - 1), np.array([self.beta * self.delta])))
-            phi[1, i, 1] = np.concatenate((np.zeros(self.d - 1), np.array([self.beta * (1 - self.delta)])))
-            print("P(0 | %d, 0) = %f"%(i, np.dot(phi[0, i, 0], self.theta_tilde)))
-            print("P(0 | %d, 1) = %f"%(i, np.dot(phi[0, i, 1], self.theta_tilde)))
-            print("P(1 | %d, 0) = %f"%(i, np.dot(phi[1, i, 0], self.theta_tilde)))
-            print("P(1 | %d, 1) = %f"%(i, np.dot(phi[1, i, 1], self.theta_tilde)))
-        print("theta_star: ", self.theta)
+            action_vector = self.actions[i]  # Assuming self.actions is a list of action vectors with size (self.d - 1)
+
+            phi[0, i, 0] = np.concatenate((-self.alpha * action_vector, [self.beta * (1 - self.delta)]))
+            phi[0, i, 1] = np.concatenate((self.alpha * action_vector, [self.beta * self.delta]))
+            phi[1, i, 0] = np.concatenate((np.zeros(self.d - 1), [self.beta * self.delta]))
+            phi[1, i, 1] = np.concatenate((np.zeros(self.d - 1), [self.beta * (1 - self.delta)]))
+            
         return phi
     
+    def generate_varphi(self):
+        varphi = np.zeros((self.nState, self.nAction, self.d))
+        for s in range(self.nState):
+            for a in range(self.nAction):
+                target_value = self.reward[s, a] 
+                varphi[s, a, :-1] = np.random.rand(self.d - 1)
+                remaining = (target_value - np.dot(varphi[s, a, :-1], self.theta_tilde[:-1])) / self.theta_tilde[-1]
+                varphi[s, a, -1] = remaining
+
+        return varphi
+    
     def transition_prob(self, s, a):
-        action = self.actions[a]
+        action = self.actions[int(a)]
         if s == 0:  # from state x0
             prob_x0 = 1 - self.delta - np.dot(action, self.theta)
             prob_x1 = self.delta + np.dot(action, self.theta)
@@ -66,17 +83,16 @@ class HardLinearMixtureMDP:
         return self.state, reward
     
     def run_optimal_policy(self):
-        optimal_policy = self.generate_optimal_policy()  # Derive optimal policy from q^*
+        optimal_policy = self.generate_optimal_policy() 
         assert(len(optimal_policy) == self.nState)
-        total_reward_optimal = [] # To store the rewards obtained by the optimal policy
+        total_reward_optimal = []
 
-        self.reset()  # Reset environment to the initial state
+        self.reset() 
         for t in range(self.T):
             s_t = self.state
-            a_t = optimal_policy[s_t]  # Select the action from the optimal policy
-            _, reward = self.step(s_t, a_t)  # Take the action and receive reward
+            a_t = optimal_policy[s_t] 
+            _, reward = self.step(s_t, a_t) 
             total_reward_optimal.append(reward)
-
         return total_reward_optimal
     
     def generate_optimal_policy(self):
@@ -86,22 +102,19 @@ class HardLinearMixtureMDP:
                 if (np.dot(self.actions[i], self.theta) == self.triangle):
                     policy[s] = i
         return policy
-                    
-    
-    def reset(self):
-        self.state = 0
-        self.timestep = 0
-        return self.state
 
-# # Usage example:
-# d = 8  # dimensionality
-# D = 100  # big radius
-# T = 1000
 
-# mdp = HardMDP(d=d, D=D, T=T)
-# state = mdp.reset()
+d = 3
+D = 5
+T = 10000
 
-# for _ in range(T):
-#     action = np.random.choice(2**(d-1), 1)[0]  # randomly choose an action
-#     next_state, reward = mdp.step(action)
-#     print(f"Action: {action}, Next State: {next_state}, Reward: {reward}")
+mdp = HardLinearMixtureMDP(d=d, D=D, T=T)
+# actions = mdp.actions
+# theta = mdp.theta
+# delta = mdp.delta
+# index = np.array([np.dot(actions[i], theta) for i in range(mdp.nAction)])
+# rank = np.argsort(-index)
+# print(rank)
+# print(1 - delta - np.min(np.array([np.dot(actions[i], theta) for i in range(mdp.nAction)])))
+# print(1 - delta - np.max(np.array([np.dot(actions[i], theta) for i in range(mdp.nAction)])))
+# print(mdp.varphi)
